@@ -9,6 +9,7 @@ import time
 import yaml
 import requests
 import logging
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.acs_exception.exceptions import ServerException, ClientException
@@ -80,16 +81,13 @@ def get_public_ip(ipv6=False, services=None):
         'https://ipinfo.io/ip',
         'https://ifconfig.me/ip',
         'https://icanhazip.com',
-        'https://ident.me',
-        'https://myexternalip.com/raw',
-        'https://ipecho.net/plain'
+        'https://ident.me'
     ]
     
     default_ipv6_services = [
         'https://api64.ipify.org',
         'https://v6.ident.me',
-        'https://ipv6.icanhazip.com',
-        'https://6.ident.me'
+        'https://ipv6.icanhazip.com'
     ]
     
     if ipv6:
@@ -100,7 +98,11 @@ def get_public_ip(ipv6=False, services=None):
     def fetch_ip(url):
         try:
             logger.debug(f"尝试从 {url} 获取IP地址")
-            r = requests.get(url, timeout=10)  # 10秒超时
+            # 添加headers避免被某些服务拒绝
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            r = requests.get(url, timeout=10, headers=headers)  # 10秒超时
             r.raise_for_status()
             ip = r.text.strip()
             if ip and valid_ip(ip, ipv6):
@@ -113,8 +115,9 @@ def get_public_ip(ipv6=False, services=None):
             logger.debug(f"从 {url} 获取IP地址失败: {e}")
             return None
 
-    # 使用线程池并发获取IP，提高效率
-    with ThreadPoolExecutor(max_workers=min(5, len(services))) as executor:
+    # 使用线程池并发获取IP，但限制并发数以避免触发服务限制
+    max_workers = min(3, len(services))  # 限制最大并发数为3
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_url = {executor.submit(fetch_ip, url): url for url in services}
         for future in as_completed(future_to_url):
             url = future_to_url[future]
@@ -139,6 +142,11 @@ def validate_config(config):
     for field in required:
         if field not in config:
             errors.append(f"缺少配置项: {field}")
+    
+    # 检查敏感信息是否已配置（不是默认值）
+    if config.get('access_key_id') == 'YOUR_ACCESS_KEY_ID' or \
+       config.get('access_key_secret') == 'YOUR_ACCESS_KEY_SECRET':
+        errors.append("请配置有效的阿里云访问密钥")
     
     if 'records' in config:
         for i, r in enumerate(config['records']):
@@ -188,13 +196,13 @@ def get_dns_record(client, domain, rr, record_type):
                 return r
         return None
     except ServerException as e:
-        logger.error(f"查询记录失败 (服务器错误): {e.get_error_code()} - {e.get_error_msg()}")
+        logger.error(f"查询记录失败 (服务器错误): {e.get_error_code()}")
         raise
     except ClientException as e:
-        logger.error(f"查询记录失败 (客户端错误): {e.get_error_code()} - {e.get_error_msg()}")
+        logger.error(f"查询记录失败 (客户端错误): {e.get_error_code()}")
         raise
     except Exception as e:
-        logger.error(f"查询记录失败 (未知错误): {e}")
+        logger.error(f"查询记录失败 (未知错误): {type(e).__name__}")
         raise
 
 @retry(max_attempts=3, delay=1, backoff=2)
@@ -208,17 +216,20 @@ def update_dns_record(client, record, ip, config):
         req.set_Value(ip)
         req.set_TTL(config.get('ttl', 600))
         resp = client.do_action_with_exception(req)
-        logger.debug(f"更新记录响应: {resp}")
+        logger.debug("更新记录成功")
         logger.info(f"已更新记录: {record['RR']} -> {ip}")
         return True
     except ServerException as e:
-        logger.error(f"更新记录失败 (服务器错误): {e.get_error_code()} - {e.get_error_msg()}")
+        if "Forbidden.RAM" in str(e.get_error_code()):
+            logger.error("权限不足，请检查阿里云访问密钥权限")
+        else:
+            logger.error(f"更新记录失败 (服务器错误): {e.get_error_code()}")
         raise
     except ClientException as e:
-        logger.error(f"更新记录失败 (客户端错误): {e.get_error_code()} - {e.get_error_msg()}")
+        logger.error(f"更新记录失败 (客户端错误): {e.get_error_code()}")
         raise
     except Exception as e:
-        logger.error(f"更新记录失败 (未知错误): {e}")
+        logger.error(f"更新记录失败 (未知错误): {type(e).__name__}")
         raise
 
 @retry(max_attempts=3, delay=1, backoff=2)
@@ -232,37 +243,51 @@ def create_dns_record(client, domain, rr, record_type, ip, config):
         req.set_Value(ip)
         req.set_TTL(config.get('ttl', 600))
         resp = client.do_action_with_exception(req)
-        logger.debug(f"创建记录响应: {resp}")
+        logger.debug("创建记录成功")
         logger.info(f"已创建记录: {rr}.{domain} -> {ip}")
         return True
     except ServerException as e:
-        if "AlreadyExists" in str(e.get_error_code()):
+        if "Forbidden.RAM" in str(e.get_error_code()):
+            logger.error("权限不足，请检查阿里云访问密钥权限")
+        elif "AlreadyExists" in str(e.get_error_code()):
             logger.info(f"记录已存在: {rr}.{domain}")
             return True
-        logger.error(f"创建记录失败 (服务器错误): {e.get_error_code()} - {e.get_error_msg()}")
+        else:
+            logger.error(f"创建记录失败 (服务器错误): {e.get_error_code()}")
         raise
     except ClientException as e:
-        logger.error(f"创建记录失败 (客户端错误): {e.get_error_code()} - {e.get_error_msg()}")
+        logger.error(f"创建记录失败 (客户端错误): {e.get_error_code()}")
         raise
     except Exception as e:
-        logger.error(f"创建记录失败 (未知错误): {e}")
+        logger.error(f"创建记录失败 (未知错误): {type(e).__name__}")
         raise
 
 def sync_records(config):
     """同步所有记录（带详细日志）"""
     start_time = time.time()
     try:
+        # 创建客户端时检查密钥格式
+        access_key_id = config['access_key_id']
+        access_key_secret = config['access_key_secret']
+        
+        # 简单检查密钥格式（不记录具体值）
+        if not access_key_id or not access_key_secret or \
+           len(access_key_id) < 10 or len(access_key_secret) < 10:
+            logger.error("阿里云访问密钥格式不正确")
+            return False
+            
         client = AcsClient(
-            config['access_key_id'],
-            config['access_key_secret'],
+            access_key_id,
+            access_key_secret,
             config.get('region', 'cn-hangzhou')
         )
         success_count = 0
         total_records = len(config['records'])
         logger.info(f"开始同步 {total_records} 条记录")
         
-        # 使用线程池并发处理所有记录，提高效率
-        with ThreadPoolExecutor(max_workers=min(10, total_records)) as executor:
+        # 使用线程池并发处理所有记录，但限制并发数
+        max_workers = min(5, total_records)  # 限制最大并发数为5
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # 提交所有记录同步任务
             future_to_record = {
                 executor.submit(sync_single_record, client, config, record): record 
@@ -279,13 +304,13 @@ def sync_records(config):
                 except Exception as e:
                     record_name = f"{record['rr']}.{config['domain']}"
                     record_type = record['type']
-                    logger.error(f"[{record_name}] 同步记录失败: {e}")
+                    logger.error(f"[{record_name}] 同步记录失败: {type(e).__name__}")
         
         duration = time.time() - start_time
         logger.info(f"同步完成: {success_count}/{total_records} 成功 ({duration:.1f}s)")
         return success_count > 0
     except Exception as e:
-        logger.error(f"同步失败: {e}")
+        logger.error(f"同步失败: {type(e).__name__}")
         return False
 
 def sync_single_record(client, config, record):
@@ -321,7 +346,7 @@ def sync_single_record(client, config, record):
             else:
                 return False
     except Exception as e:
-        logger.error(f"[{record_name}] 处理记录时发生异常: {e}")
+        logger.error(f"[{record_name}] 处理记录时发生异常: {type(e).__name__}")
         return False
 
 def main():
@@ -346,7 +371,7 @@ def main():
         success = sync_records(config)
         return 0 if success else 1
     except Exception as e:
-        log_message(f"程序执行失败: {e}", logging.ERROR)
+        log_message(f"程序执行失败: {type(e).__name__}", logging.ERROR)
         return 1
 
 if __name__ == '__main__':

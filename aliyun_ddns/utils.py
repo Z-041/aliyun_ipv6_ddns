@@ -9,6 +9,7 @@ import os
 import threading
 import time
 from functools import wraps
+import hashlib
 
 # 线程锁用于确保线程安全
 _config_lock = threading.Lock()
@@ -96,3 +97,22 @@ def retry(max_attempts=3, delay=1, backoff=2):
             return None
         return wrapper
     return decorator
+
+def mask_sensitive_info(text, patterns=None):
+    """遮蔽敏感信息"""
+    if not isinstance(text, str):
+        return text
+        
+    # 默认敏感信息模式
+    default_patterns = [
+        (r'access_key_id["\s]*[=:]["\s]*([^\s"\']{5})[^\s"\']*', r'access_key_id": "\1***"'),  # 遮蔽access_key_id
+        (r'access_key_secret["\s]*[=:]["\s]*([^\s"\']{5})[^\s"\']*', r'access_key_secret": "\1***"'),  # 遮蔽access_key_secret
+        (r'(\'|")[^\'"]{5}[^\'"]*(\'|")', r'\1*****\2'),  # 遮蔽引号中的长字符串
+    ]
+    
+    patterns = patterns or default_patterns
+    result = text
+    for pattern, replacement in patterns:
+        import re
+        result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+    return result

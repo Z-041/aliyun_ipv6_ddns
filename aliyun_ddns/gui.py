@@ -58,7 +58,7 @@ class DDNSTrayApp:
                     return True
                 return False
             except Exception as e:
-                core.log_message(f"配置错误: {e}", logging.ERROR)
+                core.log_message(f"配置错误: {type(e).__name__}", logging.ERROR)
                 self.config = None
                 return False
 
@@ -127,7 +127,7 @@ class DDNSTrayApp:
                 # 减少CPU占用，增加到30秒
                 time.sleep(30)
             except Exception as e:
-                core.log_message(f"工作线程错误: {e}", logging.ERROR)
+                core.log_message(f"工作线程错误: {type(e).__name__}", logging.ERROR)
                 time.sleep(60)  # 出错时等待更长时间
 
     def _sync_once(self):
@@ -139,7 +139,7 @@ class DDNSTrayApp:
             else:
                 self.icon.icon = self._create_icon("#F44336")  # 红色
         except Exception as e:
-            core.log_message(f"同步错误: {e}", logging.ERROR)
+            core.log_message(f"同步错误: {type(e).__name__}", logging.ERROR)
 
     def _sync(self, icon, item):
         """手动同步"""
@@ -166,7 +166,7 @@ class DDNSTrayApp:
                     msg.append(f"{rec['RR']}.{self.config['domain']}: {rec['Value']}")
             self._msg("DNS记录", "\n".join(msg) or "无记录")
         except Exception as e:
-            core.log_message(f"获取记录失败: {e}", logging.ERROR)
+            core.log_message(f"获取记录失败: {type(e).__name__}", logging.ERROR)
             self._msg("错误", "获取记录失败")
 
     def _edit_config(self, icon, item):
@@ -174,13 +174,13 @@ class DDNSTrayApp:
         try:
             system = platform.system()
             if system == "Windows":
-                subprocess.run(["notepad", CONFIG_FILE])
+                subprocess.run(["notepad", CONFIG_FILE], check=True)
             elif system == "Darwin":  # macOS
-                subprocess.run(["open", CONFIG_FILE])
+                subprocess.run(["open", CONFIG_FILE], check=True)
             else:  # Linux
-                subprocess.run(["xdg-open", CONFIG_FILE])
+                subprocess.run(["xdg-open", CONFIG_FILE], check=True)
         except Exception as e:
-            core.log_message(f"无法打开配置文件: {e}", logging.ERROR)
+            core.log_message(f"无法打开配置文件: {type(e).__name__}", logging.ERROR)
             self._msg("错误", "无法打开配置文件")
 
     def _msg(self, title, msg):
@@ -204,7 +204,7 @@ def main():
         app = DDNSTrayApp()
         app.run()
     except Exception as e:
-        core.log_message(f"启动失败: {e}", logging.ERROR)
+        core.log_message(f"启动失败: {type(e).__name__}", logging.ERROR)
         sys.exit(1)
 
 if __name__ == '__main__':

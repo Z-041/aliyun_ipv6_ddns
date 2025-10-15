@@ -1,5 +1,5 @@
 aliyun-python-sdk-core>=2.13.3
-aliyun-python-sdk-alidns>=2.6.0
+aliyun-python-sdk-alidns>=2.6.18
 pystray>=0.19.4
 Pillow>=9.0.0
 requests>=2.28.0

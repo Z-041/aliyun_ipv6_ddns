@@ -14,6 +14,13 @@
 - **记录查看**：方便查看当前阿里云 DNS 记录的详细信息。
 - **配置更新提醒**：当配置文件发生更改时，会自动重新加载并给出通知。
 
+## 安全性说明
+
+- 项目使用阿里云官方 SDK 进行 API 调用，确保通信安全
+- 敏感信息（如 access_key_id 和 access_key_secret）不会记录到日志中
+- 配置文件应妥善保管，避免泄露敏感信息
+- 建议使用具有最小权限的子账号访问密钥
+
 ## 安装
 
 ```bash
@@ -22,7 +29,13 @@ pip install -r requirements.txt
 
 ## 配置说明
 
-在项目根目录下，有一个 `config.yaml` 文件，用于配置阿里云账号信息和 DNS 记录。以下是一个示例配置：
+在项目根目录下，有一个 `config.yaml` 文件，用于配置阿里云账号信息和 DNS 记录。为了安全起见，项目提供了 `config.yaml.example` 示例文件，请复制该文件并修改为您自己的配置：
+
+```bash
+cp config.yaml.example config.yaml
+```
+
+然后编辑 `config.yaml` 文件，填入您的阿里云访问密钥和域名信息：
 
 ```yaml
 access_key_id: 'your-access_key_id'
@@ -47,13 +60,13 @@ ttl: 600       # DNS 记录 TTL（秒）
 ### 命令行模式
 
 ```bash
-python -m aliyun_ddns.core
+aliyun-ddns-core
 ```
 
 ### GUI 模式
 
 ```bash
-python -m aliyun_ddns.gui
+aliyun-ddns-gui
 ```
 
 程序启动后，会在系统托盘显示一个图标，右键单击该图标可以进行各种操作：
@@ -74,14 +87,23 @@ aliyun_ddns/
 │   ├── gui.py          # 图形界面模块
 │   └── utils.py        # 工具函数模块
 ├── logs/               # 日志文件目录
-├── config.yaml         # 配置文件
+├── config.yaml         # 配置文件（请勿提交到版本控制）
+├── config.yaml.example # 配置文件示例
 ├── requirements.txt    # 依赖列表
 ├── setup.py            # 安装脚本
 └── README.md
 ```
+
+## 性能优化
+
+- 使用线程池并发处理多个 DNS 记录，提高同步效率
+- 实现智能 IP 获取策略，自动选择最快的 IP 查询服务
+- 采用缓存机制避免频繁请求相同的 IP 地址
+- 优化重试机制，智能处理网络异常
 
 ## 注意事项
 
 - 请确保你的阿里云账号具有足够的权限来管理 DNS 记录。
 - 如果在使用过程中遇到问题，可以查看日志文件以获取更多详细信息。
 - 配置文件修改后，程序会自动检测并重新加载配置。
+- 请勿将包含敏感信息的 config.yaml 文件提交到版本控制系统。
